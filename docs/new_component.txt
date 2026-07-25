@@ -1,0 +1,20 @@
+Expanding as you go
+
+Every time the roadmap calls for a new crate or node, same two-step recipe:
+
+New library crate (e.g. zenoh-rpc-helper at Phase 3):
+
+bash
+cd hermes
+cargo new --lib crates/zenoh-rpc-helper
+
+Then add "crates/zenoh-rpc-helper" to the root Cargo.toml's members list. RustRover picks it up automatically on next Cargo sync (or click the refresh icon in the Cargo tool window).
+
+New node (e.g. state-machine at Phase 6):
+
+bash
+cargo new nodes/state-machine
+
+Add "nodes/state-machine" to members, then edit its Cargo.toml to depend on hermes-types and whatever else it needs (path = "../../crates/hermes-types").
+
+That's the whole pattern for the rest of the project — no need to restructure anything as it grows, just new folders under crates/ or nodes/ and one line added to the workspace manifest each time.

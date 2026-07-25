@@ -1,0 +1,77 @@
+graph TD
+    subgraph INPUT["Input & Safety — highest priority path"]
+        GP["Gamepad Adapter<br/>(Rust · pub + RPC client)"]
+        SM["State Machine<br/>(Rust · pub + queryable)<br/>owns: Manual/Auto/SLAM/EStop"]
+        SAFE["Safety Monitor<br/>(Rust · sub + RPC client)<br/>watches scan/pose for collision risk"]
+    end
+
+    subgraph SENSORS["Sensor Drivers — real HW today, sim-backed for now"]
+        VESC["VESC Driver<br/>(motor+steer+telemetry, JSON/serial)"]
+        LIDAR["RPLidar Driver"]
+        IMU["IMU Driver"]
+        OAKD["OAK-D Bridge (Python)<br/>DEFERRED — no current use"]
+        SIMENG["Sim Physics Engine<br/>drives VESC/LiDAR/IMU outputs<br/>from commanded Twist"]
+    end
+
+    subgraph ESTIM["State Estimation"]
+        ODOM["Odometry<br/>fuses VESC + IMU → pose"]
+        SLAM["SLAM<br/>scan + odom → map + pose<br/>(active: SLAM mode)"]
+        LOC["Localization (AMCL-style)<br/>scan + odom + map → pose<br/>(active: Auto mode)"]
+    end
+
+    subgraph PLAN["Planning & Control"]
+        GPLAN["Global Planner / Waypoints<br/>map/route → reference path"]
+        CTRL["Controller<br/>(Pure Pursuit / MPC)<br/>owns Tunable gains"]
+    end
+
+    subgraph FUNC["Functions (queryable pattern, not one node)"]
+        CONST["Constants<br/>one-shot get, fixed values only"]
+        INFER["Inference service<br/>(SAC/ONNX, ort)"]
+    end
+
+    GP -->|pub: commands/manual| SM
+    GP -->|pub: commands/manual| CTRL
+    GP -.->|RPC: SetParam| CTRL
+    GP -.->|RPC: SetParam| SM
+
+    SAFE -.->|RPC/pub: estop request| SM
+
+    SM -->|pub: state/mode| CTRL
+    SM -->|pub: state/mode| SLAM
+    SM -->|pub: state/mode| LOC
+    SM -->|pub: state/mode| SAFE
+    SM -.->|queryable: mode/get late-joiner| CTRL
+
+    SIMENG -.-> VESC
+    SIMENG -.-> LIDAR
+    SIMENG -.-> IMU
+
+    VESC -->|pub: sensors/vesc_telemetry| ODOM
+    IMU -->|pub: sensors/imu| ODOM
+    LIDAR -->|pub: sensors/scan| SLAM
+    LIDAR -->|pub: sensors/scan| LOC
+    LIDAR -->|pub: sensors/scan| SAFE
+
+    ODOM -->|pub: state/odom| SLAM
+    ODOM -->|pub: state/odom| LOC
+    ODOM -->|pub: state/odom| CTRL
+
+    SLAM -->|pub: map/occupancy_grid| GPLAN
+    SLAM -.->|queryable: map/get| GPLAN
+    LOC -->|pub: state/pose| CTRL
+    LOC -->|pub: state/pose| GPLAN
+
+    GPLAN -->|pub/queryable: plan/waypoints| CTRL
+
+    CTRL -.->|RPC: solve request| INFER
+    CTRL -->|pub: cmd/twist| VESC
+
+    CONST -.->|one-shot get at boot| GP
+    CONST -.->|one-shot get at boot| CTRL
+    CONST -.->|one-shot get at boot| SM
+    CONST -.->|one-shot get at boot| ODOM
+
+    classDef highPrio fill:#ff6b6b,stroke:#333,stroke-width:2px,color:#fff
+    classDef sim fill:#ffd93d,stroke:#333,stroke-width:1px,color:#333
+    class GP,SM,SAFE highPrio
+    class SIMENG,OAKD sim

@@ -1,0 +1,8 @@
+[package]
+name = "gamepad-trigger"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hermes-types = { path = "../hermes-types" }
+botpad = "0.1.1"

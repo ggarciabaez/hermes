@@ -1,0 +1,10 @@
+[package]
+name = "gamepad-adapter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hermes-types = { path = "../../crates/hermes-types" }
+gamepad-trigger = { path = "../../crates/gamepad-trigger" }
+tokio = { workspace = true }
+zenoh = { workspace = true }
