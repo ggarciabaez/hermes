@@ -1,0 +1,11 @@
+[package]
+name = "state-machine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hermes-types = { path = "../../crates/hermes-types" }
+tokio = { workspace = true }
+zenoh = { workspace = true }
+serde = { workspace = true}
+

@@ -5,6 +5,8 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/gamepad-trigger/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/hermes-types/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/nodes/gamepad-adapter/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/gamepad-adapter/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/state-machine/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

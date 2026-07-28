@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 hermes-types = { path = "../../crates/hermes-types" }
-gamepad-trigger = { path = "../../crates/gamepad-trigger" }
+botpad = { workspace = true }
 tokio = { workspace = true }
 zenoh = { workspace = true }
+serde = { workspace = true}
+

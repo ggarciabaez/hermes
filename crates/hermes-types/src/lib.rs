@@ -1,7 +1,19 @@
-use serde::{Deserialize, Serialize};
+mod messages;
+pub mod rpc;
+pub mod sm;
+pub mod ctrl;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Command {
-    Drive { v: f32, y: f32 },
-    EStop,
+use serde::{Deserialize, Serialize};
+pub use messages::{MsgMetadata, SendMessage, RecvMessage};
+
+// TODO: add nodes as we go. These are the ones that come to mind
+// we could add strings to them to work as node names
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Node {
+    Gamepad,
+    SM,
+    Lifeguard,
+    Achilles,
+    Controller,
+
 }

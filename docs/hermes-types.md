@@ -1,283 +1,215 @@
 # hermes-types — Crate Design Reference
 
-Single source of truth for every cross-node type/trait in the project. Every node
-depends on this crate; nothing hand-rolls its own message shapes. Treat this doc as
-the design contract — update it *before* adding a type to the crate, not after, so it
-never drifts out of sync with the code.
-
-Per Phase 0 of the plan: don't pre-build all of this speculatively. Start with
-`Command`, add the rest as each roadmap phase actually needs it. This doc describes
-the target shape you're building toward, not a checklist to implement in one sitting.
+Single source of truth for every cross-node type in the project. Every node
+depends on this crate; nothing hand-rolls its own message shapes. This crate
+grows as each roadmap phase actually needs a new type — it is not built out
+speculatively ahead of that need.
 
 ## Quick reference
 
-| Name | Kind | Used by | Purpose |
+| Name | Kind | Status | Purpose |
 |---|---|---|---|
-| `Mode` | enum | State Machine (writes), all control nodes (read) | Robot operating state |
-| `Severity` | enum | any node (write), State Machine (read) | Fault report priority |
-| `ParamValue` | enum | any `Tunable` node, Params Registry, debug tool | Type-erased wire value for param RPCs |
-| `Command` | enum | Gamepad Adapter (pub), State Machine + Controller (sub) | Manual input |
-| `Pose` | struct | Odometry, SLAM, Localization, Global Planner | SE(2) position + heading |
-| `Twist` | struct | Controller (pub), VESC Driver (sub) | Commanded velocity/steering |
-| `LaserScan` | struct | RPLidar Driver (pub), SLAM/Localization/Safety Monitor (sub) | LiDAR frame |
-| `ImuData` | struct | IMU Driver (pub), Odometry (sub) | IMU frame |
-| `VescTelemetry` | struct | VESC Driver (pub), Odometry (sub) | Motor/steering telemetry |
-| `Waypoint` / `Path` | struct | Global Planner (pub), Controller (sub) | Reference trajectory |
-| `OccupancyGrid` | struct | SLAM (pub/serve), Global Planner/Localization/Sim Frontend (sub) | Map |
-| `FaultReport` | struct | any node (pub), State Machine (sub) | Fault channel payload |
-| `Bounds<T>` | generic struct | any `Param<T>` | Declarative min/max, from `config.toml` |
-| `Param<T>` | generic struct | every node with tunables | Value + validation, backing store for `Tunable` |
-| `ParamInfo` | struct | `Tunable::list()`, Params Registry, debug tool | One param's wire-safe snapshot |
-| `NodeManifest` / `TopicInfo` / `QueryableInfo` | struct | `Introspectable::manifest()`, debug tool | Self-description for graph building |
-| `SetParamRequest/Response` etc. | struct | any RPC caller ↔ `Tunable` node | Param RPC wire types |
-| `Tunable` | trait | every node with live params | `get`/`set`/`list` |
-| `Introspectable` | trait | every node | `manifest()` |
+| `Node` | enum | implemented | RPC-caller identity |
+| `Mode` | enum | implemented | Robot operating state |
+| `transition()` | fn | implemented | Legality check for a mode change, used only by State Machine |
+| `ModeRequest` | struct | implemented | Payload for the mode-set RPC |
+| `MsgMetadata` | struct | implemented | key_expr/kind/timestamp carried alongside a decoded pub/sub payload |
+| `SendMessage<T>` | struct | implemented | Outgoing payload wrapper, converts into Zenoh's byte type |
+| `RecvMessage<T>` | struct | implemented | Incoming pub/sub payload + metadata |
+| `Request<T>` | struct | implemented | Incoming RPC query payload + key_expr |
+| `QueryError` | enum | to add | Error type returned by the `query()`/`query_with()` helper functions |
+| `Severity` | enum | not built | Fault report priority |
+| `FaultReport` | struct | not built | Fault channel payload |
+| `ParamValue` / `Bounds<T>` / `Param<T>` | enum/struct/struct | not built | Params system |
+| `ParamInfo` | struct | not built | Snapshot returned by a node's parameter-list queryable |
+| `NodeManifest` / `TopicInfo` / `QueryableInfo` | struct | not built | Self-description for Achilles' graph |
+| `Tunable` / `Introspectable` | trait | not built | Live params / self-description, implemented by every node that needs them |
+
+There is no shared "Command" type in this crate, and there will not be one.
+Button/trigger→intent mapping is internal to whichever node owns the input
+device and never crosses Zenoh in that form.
 
 ---
 
-## 1. Enums
+## 1. `Node`
 
-### `Mode`
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Mode { Manual, Auto, Slam, EStop, SwStop, Halt }
-```
-Published exclusively by State Machine on `f1tenth/state/mode`. Every control node
-subscribes and treats it as a high-priority (`biased;`) `select!` branch. `Halt`
-triggers the same shutdown path as `ctrl_c`.
-
-### `Severity`
-```rust
-pub enum Severity { Info, Warning, Critical }
-```
-Carried in `FaultReport`. Any node can publish one; only State Machine consumes it
-to decide policy (Critical→EStop, Warning→SwStop/forced Manual, Info→log only).
-
-### `ParamValue`
-```rust
-pub enum ParamValue { F32(f32), F64(f64), I32(i32), Bool(bool), String(String) }
-```
-Type-erased wire value. Needed because a generic "list all params" caller (Params
-Registry, debug tool) can't know each node's concrete param types ahead of time.
-Nodes convert to/from this only at the RPC boundary — internal logic stays concrete
-(`Param<f32>`, etc.).
-
-### `Command`
-```rust
-pub enum Command {
-    Drive { velocity: f32, steering: f32 },
-    ModeRequest(Mode),
-    EStop, // hard trigger — direct to State Machine, bypasses safety/report entirely
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Node {
+    Gamepad,
+    SM,
+    Lifeguard,
+    Achilles,
+    Controller,
 }
 ```
-Published by Gamepad Adapter on `f1tenth/commands/manual`. `EStop` is handled as a
-special case downstream — never routed through the fault-report/policy path.
 
----
+One variant per node. Used as the RPC-caller identity (carried in
+`ModeRequest.source`) and anywhere else a message needs to say who sent it.
+Add a variant as each new node comes online.
 
-## 2. Structs
+A `name()` method returning a plain debug/display string is reasonable to
+add now:
 
-### `Pose` / `Twist`
 ```rust
-pub struct Pose(pub nalgebra::Isometry2<f32>);
-pub struct Twist { pub linear: f32, pub angular: f32 }
-```
-`Pose` wraps nalgebra's SE(2) isometry — used wherever a position+heading estimate is
-produced or consumed (Odometry, SLAM, Localization, Global Planner). `Twist` is
-Controller's output on `f1tenth/cmd/twist`, consumed by VESC Driver.
-
-### `LaserScan`
-```rust
-pub struct LaserScan {
-    pub angle_min: f32,
-    pub angle_max: f32,
-    pub angle_increment: f32,
-    pub ranges: Vec<f32>,
-    pub timestamp: u64,
-}
-```
-Published by RPLidar Driver (real or sim-backed — canonical shape either way) on
-`f1tenth/sensors/scan`. Consumed by SLAM, Localization, Safety Monitor.
-
-### `ImuData`
-```rust
-pub struct ImuData {
-    pub angular_velocity: [f32; 3],
-    pub linear_acceleration: [f32; 3],
-    pub timestamp: u64,
-}
-```
-Published by IMU Driver on `f1tenth/sensors/imu`. Consumed by Odometry.
-
-### `VescTelemetry`
-```rust
-pub struct VescTelemetry {
-    pub rpm: f32,
-    pub current: f32,
-    pub voltage: f32,
-    pub steering_angle: f32,
-    pub timestamp: u64,
-}
-```
-Published by VESC Driver on `f1tenth/sensors/vesc_telemetry`. Consumed by Odometry.
-
-### `Waypoint` / `Path`
-```rust
-pub struct Waypoint { pub pose: Pose, pub velocity: f32 }
-pub struct Path(pub Vec<Waypoint>);
-```
-Published/served by Global Planner on `f1tenth/plan/waypoints`, consumed by Controller.
-
-### `OccupancyGrid`
-```rust
-pub struct OccupancyGrid {
-    pub width: u32,
-    pub height: u32,
-    pub resolution: f32,
-    pub origin: Pose,
-    pub data: Vec<i8>, // -1 unknown, 0-100 occupancy probability
-}
-```
-Published + served (`map/get`) by SLAM. Consumed by Global Planner, Localization,
-Sim Frontend / debug tool for display.
-
-### `FaultReport`
-```rust
-pub struct FaultReport {
-    pub source: String,
-    pub severity: Severity,
-    pub message: String,
-    pub timestamp: u64,
-}
-```
-Published by any node to `f1tenth/safety/report`. Subscribed solely by State Machine.
-
-### `Bounds<T>`
-```rust
-pub struct Bounds<T> { pub min: T, pub max: T }
-```
-Generic. Deserialized straight from a node's `config.toml` (`bounds = [0.1, 0.5]`).
-Feeds `Param<T>`.
-
-### `Param<T>` — the one real generic in this crate
-```rust
-pub struct Param<T> {
-    value: T,
-    bounds: Option<Bounds<T>>,
-}
-
-impl<T: PartialOrd + Copy> Param<T> {
-    pub fn new(value: T, bounds: Option<Bounds<T>>) -> Self { Self { value, bounds } }
-    pub fn get(&self) -> T { self.value }
-    pub fn set(&mut self, new: T) -> Result<(), ParamError> {
-        if let Some(b) = &self.bounds {
-            if new < b.min || new > b.max {
-                return Err(ParamError::OutOfBounds);
-            }
+impl Node {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Node::Gamepad => "gamepad",
+            Node::SM => "state_machine",
+            Node::Lifeguard => "lifeguard",
+            Node::Achilles => "achilles",
+            Node::Controller => "controller",
         }
-        self.value = new;
-        Ok(())
     }
 }
 ```
-Every tunable field on every node is a `Param<T>` — pairs a value with optional
-bounds and centralizes the reject-out-of-range logic so no node hand-rolls its own
-check. A node's `Tunable` impl becomes mostly a `match` from string key to one of its
-`Param<T>` fields, converting to/from `ParamValue` only at the RPC boundary.
 
-### `ParamInfo`
-```rust
-pub struct ParamInfo {
-    pub key: String,
-    pub value: ParamValue,
-    pub bounds: Option<(ParamValue, ParamValue)>,
-}
-```
-Returned by `Tunable::list()`. Used by Params Registry to build its cache and by the
-debug tool to render a tweakable UI.
-
-### `NodeManifest` / `TopicInfo` / `QueryableInfo`
-```rust
-pub enum Direction { Publishes, Subscribes }
-
-pub struct TopicInfo {
-    pub key_expr: String,
-    pub type_name: String,
-    pub direction: Direction,
-}
-
-pub struct QueryableInfo {
-    pub key_expr: String,
-    pub request_type: String,
-    pub response_type: String,
-}
-
-pub struct NodeManifest {
-    pub node_name: String,
-    pub topics: Vec<TopicInfo>,
-    pub queryables: Vec<QueryableInfo>,
-}
-```
-Returned by every node's `Introspectable::manifest()`. This is the *only* source the
-debug tool uses to build its graph — never raw message payloads.
+Deriving a liveliness-topic key or a params-config key from `Node` is *not*
+part of this crate yet — both of those conventions (exact liveliness topic
+shape, exact params-config section shape) are still settling and shouldn't
+be baked into code prematurely.
 
 ---
 
-## 3. RPC request/response types
+## 2. `Mode` and `transition()`
 
 ```rust
-pub struct SetParamRequest { pub key: String, pub value: ParamValue, pub source: String }
-pub struct SetParamResponse { pub result: Result<(), ParamError> }
-pub struct GetParamRequest { pub key: String }
-pub struct GetParamResponse { pub value: Option<ParamValue> }
-pub struct ListParamsRequest; // empty
-pub struct ListParamsResponse { pub params: Vec<ParamInfo> }
+#[repr(u8)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Mode { Standby, Manual, Auto, EStop, SWStop, Halt }
 
-pub enum ParamError { NotFound, OutOfBounds, TypeMismatch }
-pub enum RpcError { Timeout, Unavailable, Remote(String) }
+impl fmt::Display for Mode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Mode::{:?}", self)
+    }
+}
+
+pub fn transition(curstate: Mode, newstate: Mode) -> bool {
+    match (curstate, newstate) {
+        (Mode::Standby, _) => true,
+        (Mode::Manual, _) => true,
+        (Mode::Auto, _) => true,
+        (Mode::EStop, Mode::Halt) => true,
+        (Mode::SWStop, Mode::Standby | Mode::Halt) => true,
+        (Mode::Halt, _) => false,
+        _ => false,
+    }
+}
 ```
-`source` on `SetParamRequest` exists so logs can distinguish caller identity —
-gamepad, debug tool, Params Registry boot-load — all through the identical RPC shape,
-no privileged bypass for any of them.
+
+`transition()` is used exclusively by State Machine's mode-set gate — it is
+not a generic helper other nodes are expected to call. `Mode` itself is
+published (on change) and served (via a no-payload `get` queryable) solely by
+State Machine; every other node treats it as read-only, sourced only from
+State Machine.
+
+Two things about this table are intentionally still open, not settled:
+whether `Auto → Halt` (and `Manual → Halt`) should be legal as written here,
+and whether the SWStop lockout (see `ModeRequest` below) should ever admit an
+escalation exception for Lifeguard. Both are tracked in the project plan and
+should not be resolved silently in code without flagging it back.
 
 ---
 
-## 4. Traits
+## 3. `ModeRequest`
 
-### `Tunable`
 ```rust
-pub trait Tunable {
-    fn get(&self, key: &str) -> Option<ParamValue>;
-    fn set(&mut self, key: &str, value: ParamValue) -> Result<(), ParamError>;
-    fn list(&self) -> Vec<ParamInfo>;
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ModeRequest {
+    pub mode: Mode,
+    pub source: Node,
 }
 ```
-Implemented by every node with live-adjustable params. Backing storage is one
-`Param<T>` field per parameter; this trait is the thin dispatch layer serving
-`f1tenth/params/<node>/{get,set,list}`.
 
-### `Introspectable`
-```rust
-pub trait Introspectable {
-    fn manifest(&self) -> NodeManifest;
-}
-```
-Implemented by every node, serving `f1tenth/introspect/<node>`.
+Payload for the mode-set RPC. State Machine checks, in order: is `source` in
+`{Gamepad, Achilles, Lifeguard}`; does `transition(current, mode)` hold; and,
+if current mode is `SWStop`, is `source` anything other than `Lifeguard`
+(Lifeguard is locked out of changing mode at all while in `SWStop` —
+recovery from `SWStop` is human/Achilles-only). This three-part gate belongs
+to State Machine specifically and isn't a shape other RPCs need to copy.
 
 ---
 
-## 5. Topic / key-expression conventions
+## 4. Serialization wrappers
 
-Not exhaustively enumerated as constants yet — add to a `topics` module in this
-crate as each is actually implemented, so the module stays truthful:
+These four types are the backbone every node uses to get data on and off the
+wire, and are stable as implemented:
 
-- `f1tenth/state/mode`, `f1tenth/state/pose`, `f1tenth/state/odom`
-- `f1tenth/safety/report`
-- `f1tenth/commands/manual`
-- `f1tenth/sensors/{scan,imu,vesc_telemetry}`
-- `f1tenth/cmd/twist`
-- `f1tenth/map/occupancy_grid`, `f1tenth/map/get` (queryable)
-- `f1tenth/plan/waypoints`
-- `f1tenth/params/<node>/{get,set,list,changed}` (queryables + pub)
-- `f1tenth/introspect/<node>` (queryable)
-- `f1tenth/liveliness/<node>` (liveliness token)
+```rust
+pub struct MsgMetadata {
+    pub key_expr: KeyExpr<'static>,
+    pub kind: SampleKind,
+    pub timestamp: Option<Timestamp>,
+}
+
+pub struct SendMessage<T> { pub payload: T }
+// SendMessage<T>: Into<ZBytes> via postcard. Panics if T fails to serialize —
+// keep every wire type simple and derive-friendly.
+
+pub struct RecvMessage<T> { pub payload: T, pub metadata: MsgMetadata }
+// TryFrom<Sample> — used for anything arriving over a subscriber.
+
+pub struct Request<T> { pub parameters: T, pub key_expr: KeyExpr<'static> }
+// TryFrom<&Query> — used for anything arriving over a queryable.
+```
+
+`SendMessage`/`RecvMessage` are the pub/sub pair; `Request` is the
+query-decoding counterpart on the serving side. All three `Deref` to their
+inner payload for convenience.
+
+---
+
+## 5. RPC error type (to add)
+
+```rust
+#[derive(Debug)]
+pub enum QueryError {
+    Transport,      // couldn't issue the get at all
+    NoReply,        // no reply arrived within the timeout
+    Denied(String), // the far side replied with reply_err(..)
+    Decode,         // reply arrived but didn't deserialize as expected
+}
+```
+
+Returned by the `query()`/`query_with()` helper functions described in
+`NODE_GUIDE.md`. This is transport/call-level only — it doesn't attempt to
+carry a structured domain-specific rejection reason, since the serving side
+currently replies with a plain string via `reply_err(&str)` rather than a
+typed error payload. If a specific RPC later needs a richer, typed domain
+error, that's a decision made for that RPC's own response type, not a reason
+to expand `QueryError` itself.
+
+---
+
+## 6. Not yet built
+
+- `Severity`, `FaultReport` — needed once Lifeguard's fault-report channel is
+  built.
+- `ParamValue`, `Bounds<T>`, `Param<T>`, `ParamInfo`, `Tunable` — needed once
+  the Params node and per-node tunables are built.
+- `NodeManifest`, `TopicInfo`, `QueryableInfo`, `Introspectable` — needed once
+  Achilles' graph-building starts.
+- `Pose`, `Twist`, `LaserScan`, `ImuData`, `VescTelemetry`, `Waypoint`/`Path`,
+  `OccupancyGrid` — needed by Odometry, SLAM, Localization, Global Planner,
+  Controller, and the driver nodes respectively, each added as that node is
+  actually built.
+
+---
+
+## 7. Notes for future conversations (Context for Claude)
+
+- No shared `Command` type exists or should be added — per-node internal
+  action enums stay local.
+- `transition()` and the three-step gate in `ModeRequest`'s handling are
+  State-Machine-specific, not a general RPC pattern.
+- `Mode`'s late-joiner visibility is a `get` queryable, not a heartbeat
+  publish and not something liveliness tokens solve.
+- Two `Mode`-table questions remain open (Auto→Halt legality, and whether
+  Lifeguard should ever get an SWStop-escalation exception) — don't resolve
+  either silently.
+- Whether RPCs eventually get a `RpcCall`-style trait binding
+  request/response/key-expr together is an open, parked question — not
+  adopted, not rejected, revisit once more RPCs exist.
+- Params and Constants are one node in this project, not two, and there is no
+  separate registry/mirror node.

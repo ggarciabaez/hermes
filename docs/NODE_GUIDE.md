@@ -1,152 +1,236 @@
-# Node Design Guide (v2)
+# Node Design Guide
 
-A companion to `node_template.rs`. Same spirit as the gamepad crate's templates: not a
-library you depend on, but a shape you copy and fill in, so every node reads the same
-way six months from now.
-
-This version adds two sanctioned exceptions to the core rule below, plus standard
-handling for mode and fault reporting, now that the node set includes a State Machine
-and a debug/aggregator tool that don't fit the original model as-is.
+A companion to the crate types doc. Same idea throughout: this is a shape you
+copy and fill in, not a library you depend on, so every node reads the same
+way to whoever looks at it next.
 
 ## Core rule: one event loop, `tokio::select!`, no ambient concurrency
 
-A **control node** has exactly one place where it decides what to do next: a `select!`
-loop merging every input source it cares about — command subscriber, RPC queryable(s),
-param queryable, `state/mode`, shutdown signal. Nothing runs on its own background task
-unless it is *genuinely* independent of node state and order doesn't matter. This is a
-deliberate choice: in a control-adjacent system you want a single, readable place where
-"what can happen next" is enumerable. If two things truly need to run concurrently and
-independently, that's two nodes, not one node with two background tasks quietly
-mutating shared state.
+A control node has exactly one place where it decides what to do next: a
+`select!` loop merging every input source it cares about — subscribers,
+queryables, a shutdown signal. Nothing runs on its own background task unless
+it is genuinely independent of node state and order doesn't matter. If two
+things truly need to run concurrently and independently, that's two nodes,
+not one node quietly mutating shared state from a background task.
 
-This rule applies to every node in the system **except** the two categories below,
-which are structurally different problems and are documented as exceptions rather than
-worked around silently.
+This rule has two sanctioned exceptions:
 
-## Exception 1: long CPU-bound solves (`spawn_blocking` + race)
+**Exception 1 — long CPU-bound solves.** A synchronous solve (MPC) inside a
+`select!` branch blocks that branch until it returns. Run it via
+`tokio::task::spawn_blocking`, and race the resulting `JoinHandle` against
+higher-priority branches (mode changes, especially `EStop`) with `biased;`
+ordering so the priority branch is checked first when both are ready. The
+orphaned solve keeps running to completion on the blocking pool even after
+its result is ignored — that's an accepted cost, not a bug, so long as the
+node's normal solve cadence is fast enough that an abandoned solve dies
+quickly relative to the next one starting.
 
-A synchronous solve (MPC via `clarabel`) inside a `select!` branch blocks that branch
-until it returns — `select!` can't interrupt work already running, only choose among
-futures that haven't started polling. Two rules for this case:
+**Exception 2 — aggregator/tool nodes.** Achilles and anything shaped like it
+have a fundamentally different problem: an unbounded, dynamically-changing
+set of inputs discovered at runtime, where "latest value wins" is correct
+rather than an ordering guarantee. These nodes run one background task per
+discovered topic/node, writing into shared state that a UI reads once per
+frame. Sanctioned specifically because these nodes never *decide* anything —
+a UI frame reading a value that's one tick stale is a non-event. If a node
+like this ever starts issuing writes based on its own cached state rather
+than direct user action, that write goes through the same validated
+queryable any other caller uses — no shortcut through the cached state.
 
-- The solve runs via `tokio::task::spawn_blocking`, never inline on a normal worker
-  thread — a blocking synchronous call on a shared runtime thread stalls everything
-  else scheduled there, including higher-priority branches in *other* nodes if they
-  happen to share a runtime.
-- The `select!` loop races the resulting `JoinHandle` against higher-priority branches
-  (`state/mode` changes, especially `EStop`), with `biased;` ordering so the priority
-  branch is checked first when both are ready:
+## Late-joiner state: a `get` queryable, not a heartbeat
 
-  ```rust
-  select! {
-      biased;
-      _ = mode_rx.changed() => {
-          if *mode_rx.borrow() == Mode::EStop {
-              publish_stop().await;
-              // solve_handle is dropped/ignored — it keeps running to
-              // completion on the blocking pool, its result is just unused
-          }
-      }
-      result = &mut solve_handle => {
-          publish_twist(result?).await;
-      }
-  }
-  ```
+If a node owns a piece of single-writer state that other nodes need to see
+even after joining late (State Machine's `Mode` is the reference case), serve
+a no-payload `get` queryable that reads the same in-memory value the
+`select!` loop already owns:
 
-  This is offload, not true preemption — the OS thread keeps computing until the solver
-  returns — but it's functionally equivalent for safety purposes: the node stops
-  waiting on it and acts immediately.
+```rust
+let mode_get_qbl = session.declare_queryable("robot/mode/get").await.unwrap();
+let mut mode = Mode::Standby;
 
-## Exception 2: aggregator/tool nodes
+loop {
+    select! {
+        biased;
+        Ok(query) = mode_get_qbl.recv_async() => {
+            query.reply(query.key_expr().clone(), SendMessage::new(&mode)).await.unwrap();
+        }
+        Ok(query) = mode_set_qbl.recv_async() => {
+            // ...mutate `mode`, publish on change...
+        }
+    }
+}
+```
 
-Some nodes (Achilles; anything similar later) have a fundamentally
-different shape: an unbounded, dynamically-changing set of inputs discovered at
-runtime, where "latest value wins" is the correct semantics rather than an ordering
-guarantee. Forcing these into one `select!` loop doesn't work — you can't add branches
-at runtime.
+This deliberately avoids a periodic heartbeat publish — a heartbeat adds
+constant network traffic for a value that changes rarely, and it's not
+needed anyway: liveliness tokens already answer "is this node alive," and a
+`get` answers "what's its value right now" on demand, only when someone
+actually needs it.
 
-These nodes instead run one background task per discovered topic/node, each writing
-into shared state (a `tokio::watch` per topic, or an `Arc<Mutex<GraphState>>` for
-aggregate views), which the UI reads once per frame and triggers a repaint from. This is
-sanctioned specifically because these nodes make no control decisions — a UI frame
-reading a value that's one tick stale is a non-event, unlike a control node acting on
-stale mode state. If a node in this category ever starts *deciding* things (not just
-displaying them) — e.g. issuing `SetParam` calls based on live values rather than
-direct user action — that decision path should go through the same validated queryable
-any other caller uses, not a shortcut through its own cached state.
+## The RPC calling convention: `query()` / `query_with()`
+
+Rather than hand-rolling the get/receive/decode sequence at every call site,
+two small generic functions do it once:
+
+```rust
+#[derive(Debug)]
+pub enum QueryError { Transport, NoReply, Denied(String), Decode }
+
+/// No-payload GET — e.g. reading current mode.
+pub async fn query<T: DeserializeOwned>(
+    session: &zenoh::Session,
+    key_expr: &str,
+    timeout: Duration,
+) -> Result<T, QueryError> {
+    let replies = session.get(key_expr).timeout(timeout).await
+        .map_err(|_| QueryError::Transport)?;
+    let reply = replies.recv_async().await.map_err(|_| QueryError::NoReply)?;
+    match reply.result() {
+        Ok(sample) => {
+            let recv: RecvMessage<T> = sample.clone().try_into().map_err(|_| QueryError::Decode)?;
+            Ok(recv.payload)
+        }
+        Err(e) => Err(QueryError::Denied(format!("{:?}", e))),
+    }
+}
+
+/// Payload-carrying RPC — e.g. requesting a mode change.
+pub async fn query_with<P: Serialize, T: DeserializeOwned>(
+    session: &zenoh::Session,
+    key_expr: &str,
+    payload: P,
+    timeout: Duration,
+) -> Result<T, QueryError> {
+    let replies = session.get(key_expr)
+        .payload(SendMessage::new(payload))
+        .timeout(timeout)
+        .await
+        .map_err(|_| QueryError::Transport)?;
+    let reply = replies.recv_async().await.map_err(|_| QueryError::NoReply)?;
+    match reply.result() {
+        Ok(sample) => {
+            let recv: RecvMessage<T> = sample.clone().try_into().map_err(|_| QueryError::Decode)?;
+            Ok(recv.payload)
+        }
+        Err(e) => Err(QueryError::Denied(format!("{:?}", e))),
+    }
+}
+```
+
+Reading current mode from any node becomes one line:
+
+```rust
+pub async fn get_mode(session: &zenoh::Session) -> Mode {
+    query::<Mode>(session, "robot/mode/get", Duration::from_millis(50))
+        .await
+        .unwrap_or(Mode::Standby)
+}
+```
+
+Requesting a mode change from Gamepad becomes:
+
+```rust
+async fn request_mode_change(command: Command, session: &zenoh::Session) -> Result<(), String> {
+    let mode = /* map Command -> Mode as before */;
+    match query_with::<ModeRequest, bool>(
+        session,
+        "robot/mode/request_mode",
+        ModeRequest { mode, source: Node::Gamepad },
+        Duration::from_millis(200),
+    ).await {
+        Ok(_ack) => println!("Current mode: {}", mode),
+        Err(e) => println!("Error changing mode: {:?}", e),
+    }
+    Ok(())
+}
+```
+
+This is deliberately just two functions, not a trait binding request type,
+response type, and key-expr together. That trait-based approach was
+considered and set aside for now — with only a couple of RPCs in the system,
+it's not yet clear whether real RPCs share enough shape to make the
+abstraction worth its own complexity. Revisit this once Params or Achilles is
+underway and there's more than one or two RPCs to compare.
+
+Server-side decoding of an incoming query's payload uses the existing
+`Request<T>: TryFrom<&Query>` wrapper — no change needed there.
+
+## Access control on RPCs is per-node, not a shared pattern
+
+State Machine's `set` queryable checks source, then transition legality, then
+a situational lockout, in that order — but this three-step shape is specific
+to what State Machine needs, not a template every RPC must follow. Most other
+RPCs won't need to know or care who's calling (they won't inspect a `source`
+field at all), and that's fine. The one rule that does generalize: **any
+outgoing `query`/`query_with` call must have an explicit timeout** — never
+call one of these helpers, or `session.get()` directly, without one.
 
 ## Every control node looks like this, in order
 
-1. **State struct** — everything the node owns: cached subscriptions data, tunable
-   params (with bounds loaded from config), handles to things it calls out to. No
-   global mutable statics.
-2. **`Tunable` impl** (if it has any live-adjustable params) — `get`/`set`/`list`,
-   validation lives here, not in the caller. Bounds come from `config.toml` where
-   declarative bounds are sufficient; dynamic bounds are checked in code and a
-   violation is reported via the fault channel (see below), not silently clamped.
-3. **`Introspectable` impl** — every node exposes its manifest (what it
-   publishes/subscribes/serves, with types) via a queryable. This is what the debug
-   tool uses to build its graph; keep it accurate as topics are added.
-4. **Message handlers** — plain functions/methods taking `&mut State` and a decoded
-   message, returning what (if anything) to publish. Keep these free of Zenoh types
-   where possible.
+1. **State struct** — everything the node owns: cached subscription data,
+   tunable params, handles to things it calls out to. No global mutable
+   statics.
+2. **`Tunable` impl** (if it has live-adjustable params) — `get`/`set`/`list`,
+   validation lives here, not in the caller.
+3. **`Introspectable` impl** — every node exposes a manifest describing what
+   it publishes/subscribes/serves. This is what Achilles uses to build its
+   graph.
+4. **Message handlers** — plain functions taking `&mut State` and a decoded
+   message, returning what (if anything) to publish. Keep these free of
+   Zenoh types where possible.
 5. **`main`** — wires up the session, declares a liveliness token, declares
    subscriber(s)/queryable(s), runs the `select!` loop, handles shutdown.
 
 ## Mode handling is a standard, high-priority branch
 
-Every control node subscribes to `state/mode` and treats it as one of the first
-branches checked in its `select!` loop (`biased;`, mode/estop checked before ordinary
-work). A node never infers or guesses mode from other signals — `state/mode`, published
-solely by the State Machine node, is the only source of truth. On `Mode::Halt`,
-treat it exactly like the `ctrl_c` shutdown branch below — this is not a special case,
-it's the same cleanup path triggered by a different signal.
+Every control node subscribes to mode changes (or reads it via `get_mode()`
+at points where it needs a fresh value) and treats it as one of the first
+branches checked in its `select!` loop, `biased;` ordering, mode/estop
+checked before ordinary work. A node never infers mode from anything other
+than the value State Machine publishes/serves.
 
-## Fault reporting is available to any control node, not just Safety Monitor
+## Fault reporting is Lifeguard's channel, not State Machine's
 
-Any node that detects its own fault condition (a validation failure outside declared
-bounds, a stalled sensor, an internal error worth surfacing) publishes to
-`f1tenth/safety/report` with a severity and message, using the same fault-report type
-from the types crate that Safety Monitor uses. This is a fire-and-forget pub, not a
-queryable — the node doesn't need or wait for a response; State Machine decides the
-consequence and logs centrally. Don't build a bespoke local-logging path for faults —
-route them here so there's one place to look.
+Any node that detects its own fault condition publishes to the fault-report
+topic. Lifeguard is the sole subscriber, evaluates severity, and decides
+whether to call State Machine's `set` RPC as a consequence. This is a
+fire-and-forget pub — the reporting node doesn't wait for or need a reply.
+Don't build a bespoke local-logging path for faults; route them through this
+one channel so there's one place to look. Lifeguard's own self-detected
+faults skip the publish step (it would otherwise be both publisher and
+subscriber of its own channel) but go through the identical evaluate/log
+logic as an externally-reported one.
 
 ## Serving vs. calling
 
-- **Serving** (this node is the authority on something): declare a queryable, reply to
-  each query on the same loop iteration you received it — no spawning a task to handle
-  a query unless the work inside is genuinely long-running (see Exception 1), and even
-  then, spawn + reply-when-done rather than fire-and-forget.
-- **Calling** (this node needs something from another node): a small async fn wrapping
-  `session.get()`, always with an explicit timeout, always returning a `Result` the
-  caller has to handle. Never `.unwrap()` a remote call in a control-loop node.
-
-## Param mutation is just another queryable, not a special case
-
-`SetParam`/`GetParam`/`ListParams` get handled in the exact same match arm structure as
-any other queryable request. There's no separate "config subsystem." This applies
-regardless of caller — a gamepad trigger, the Params Registry's boot-time load, and the
-Achilles's live-tweak UI all go through the identical `set` queryable on the owning
-node. No caller gets a privileged bypass.
+- **Serving** (this node is the authority on something): declare a
+  queryable, reply to each query on the same loop iteration you received it
+  — no spawning a task to handle a query unless the work inside is genuinely
+  long-running (Exception 1 above), and even then, spawn + reply-when-done
+  rather than fire-and-forget.
+- **Calling** (this node needs something from another node): use `query()`
+  or `query_with()`, always with an explicit timeout, always handling the
+  `Result` — never `.unwrap()` a remote call in a control-loop node.
 
 ## Shutdown is explicit
 
-Every control node's `select!` includes a branch on `tokio::signal::ctrl_c()` *and*
-treats `Mode::Halt` from the State Machine identically — both break the loop cleanly
-after stopping actuators, closing resources, and flushing state. No relying on the
+Every control node's `select!` includes a branch on `tokio::signal::ctrl_c()`
+and treats `Mode::Halt` identically — both break the loop cleanly after
+stopping actuators, closing resources, and flushing state. No relying on the
 process getting SIGKILL'd.
 
 ## What NOT to do
 
-- Don't `tokio::spawn` a handler just because you can — spawning means you've given up
-  the ordering guarantee the `select!` loop exists to provide, unless you're in one of
-  the two documented exceptions above.
-- Don't let a node read another node's state directly (shared memory, global, whatever)
-  — if you need it, that's a subscribe or a query, full stop.
-- Don't put validation logic in the caller of `set_param` — the owning node validates,
-  always.
-- Don't infer mode from anything other than `state/mode` — no guessing based on which
-  topics are currently publishing.
-- Don't build a node-local logging path for faults that bypasses `safety/report` — one
-  channel, one place to look.
+- Don't `tokio::spawn` a handler just because you can — that gives up the
+  ordering guarantee the `select!` loop exists to provide, unless you're in
+  one of the two documented exceptions.
+- Don't let a node read another node's state directly (shared memory,
+  global, whatever) — if you need it, that's a subscribe or a query, full
+  stop.
+- Don't put validation logic in the caller of a `set` — the owning node
+  validates, always.
+- Don't infer mode from anything other than what State Machine
+  publishes/serves — no guessing based on which topics are currently active.
+- Don't build a node-local logging path for faults that bypasses the
+  fault-report channel.
+- Don't call `query()`/`query_with()` (or `session.get()` directly) without
+  an explicit timeout.
