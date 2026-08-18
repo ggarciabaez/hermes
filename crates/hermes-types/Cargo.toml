@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+hermes-macros = { path = "../hermes-macros" }
 serde = { workspace = true }
 postcard = { workspace = true }
 zenoh = { workspace = true }
 botpad = { workspace = true }
+toml = { workspace = true }
+tokio = { workspace = true }

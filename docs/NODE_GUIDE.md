@@ -211,6 +211,41 @@ logic as an externally-reported one.
   or `query_with()`, always with an explicit timeout, always handling the
   `Result` — never `.unwrap()` a remote call in a control-loop node.
 
+## Serving tunables
+
+A param-owning node implements `hermes_types::params::Tunable` on the struct
+holding its params, then serves three queryables and one publisher, all
+declared in its own domain (`robot/<node>/params/...`):
+
+- **`params/list`** — no-payload get; `serve_params_list(query, &params)`
+  replies with `Vec<ParamInfo>`.
+- **`params/get`** — payload is the `String` key; `serve_params_get(query,
+  &params)` replies with the current `ParamValue`.
+- **`params/set`** — payload is `ParamSetRequest { key, value }`;
+  `serve_params_set(query, &mut params)` decodes, calls `Tunable::set` (all
+  rejection logic lives in the node's own `set` impl — bounds, type, unknown
+  key), replies `true` on success or a `reply_err` otherwise, and returns the
+  updated `ParamInfo` so the caller publishes it on `params/changed`:
+
+  ```rust
+  Ok(query) = params_set.get() => {
+      if let Ok(Some(info)) = serve_params_set(query, &mut params).await {
+          params_changed.put(&info).await.ok();
+      }
+  }
+  ```
+
+  The `changed` publish happens on the same loop iteration as the successful
+  mutation — no background task, no deferred emit. Borrowing `&mut params` in
+  the branch *body* (never in a `select!` condition) keeps the one-loop rule
+  and the borrow checker happy.
+
+Boot loading is the same `Tunable::set` path: the node waits for the Params
+liveliness token (`wait_for_liveliness`), calls `fetch_params()`, and applies
+each `(key, ParamValue)` pair through `set`. A param-owning node typically
+waits for Params before starting its control loop, falling back to its
+defaults if Params never appears.
+
 ## Shutdown is explicit
 
 Every control node's `select!` includes a branch on `tokio::signal::ctrl_c()`

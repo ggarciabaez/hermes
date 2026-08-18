@@ -1,5 +1,5 @@
-use hermes_types::ctrl::ControllerState;
-use hermes_types::{RecvMessage, SendMessage, rpc::Request, Node};
+use hermes_types::gpad::ControllerState;
+use hermes_types::{RecvMessage, SendMessage, rpc::Request, NodeName};
 use hermes_types::sm::*;
 use tokio::time;
 
@@ -20,7 +20,7 @@ async fn main() {
             Ok(mode_query) = chmode.recv_async() => {
                 let request: Request<ModeRequest> = (&mode_query).try_into().unwrap();
                 let mut approved = false;
-                if request.source == Node::Gamepad {
+                if request.source == NodeName::Gamepad {
                     mode = request.mode.clone();
                     approved = true;
                 }

@@ -58,12 +58,11 @@ payoff yet. It's parked as an open roadmap question (Section 6, Phase 3/4) to
 revisit once enough RPCs exist to see whether they actually share a shape
 worth abstracting.
 
-**Node identity:** the `Node` enum (one variant per node, also used to tag
-RPC callers) has a `name()` method returning a plain debug string. Deriving a
-liveliness key or params-config key from it is deliberately not built yet —
-those conventions (exact liveliness topic shape, exact params-config key
-shape) aren't settled enough to bake into code without likely needing to
-redo it.
+**Node identity:** the `NodeName` enum (one variant per node, also used to tag
+RPC callers) has a `name()` method returning a plain debug string. Both
+derived conventions are now settled and baked into code: the liveliness topic
+is `robot/<name>/liveliness`, and the params-config key / tunable-endpoint
+stem is the same lowercase name (`[params.<name>]`, `robot/<name>/params/*`).
 
 **State Machine's RPC gate is State-Machine-specific**, not a general
 pattern other RPCs are expected to copy. It's described fully in Section 3.
@@ -176,17 +175,26 @@ One node, not two. It owns a single config file at boot, holding:
   SLAM run) — served one-shot, `get`-only, no live subscription, and no
   runtime write path from any other node. A finished SLAM run's map is picked
   up by a *later* run's config, never written into a running instance.
-- **Tunable starting values**, one section per owning node — dispatched to
-  each node at boot via the same `set` RPC a live tweak would use. There is
-  exactly one way any tunable parameter ever changes, whether that's boot
-  loading, a gamepad trigger, or Achilles' live-tweak UI.
+- **Tunable starting values**, one section per owning node — pulled by each
+  node at boot through its own `Tunable::set`, the same method a live `set`
+  RPC invokes. There is exactly one way any tunable parameter ever changes,
+  whether that's boot loading, a gamepad trigger, or Achilles' live-tweak UI.
+
+Boot sequencing is pull-based: a node waits for the Params liveliness token
+(`robot/params/liveliness`), calls `robot/params/get` for its
+`[params.<name>]` slice, and applies each key/value through its `Tunable::set`.
+The wire shape for slices is `Vec<(String, ParamValue)>` (type-erased scalars)
+— raw TOML can't cross the postcard wire. Each param-owning node serves
+`robot/<name>/params/{list,set,get}` and publishes
+`robot/<name>/params/changed` on a successful mutation. Gamepad's
+`deadzone`/`v_min`/`v_max` are the proof of the mechanism end to end.
 
 There is no separate registry/mirror node. Achilles queries live values
-directly: a wildcard `get` across every node's own parameter-list queryable,
-using Zenoh's native multi-reply `get` to fan the request out and collect
-every node's response in one call. Per-node detail (what a given node
-currently publishes/subscribes/serves) comes from that node's own manifest,
-not from a centralized cache.
+directly: a wildcard `get` across every node's own parameter-list queryable
+(`robot/*/params/list`), using Zenoh's native multi-reply `get` to fan the
+request out and collect every node's response in one call. Per-node detail
+(what a given node currently publishes/subscribes/serves) comes from that
+node's own manifest, not from a centralized cache.
 
 ---
 
@@ -208,15 +216,6 @@ Nothing crosses the wire as a shared "Command" type. Instead:
 
 ## 6. Roadmap
 
-**Phase 0 — Rust fundamentals** — done. Basic serialization wrapper types
-exist and work (see `hermes-types.md`).
-
-**Phase 1 — Async fundamentals** — done. `tokio::select!` loops working in
-both nodes built so far.
-
-**Phase 2 — Gamepad** — in progress. Mode/EStop RPC calls working. Raw
-drive-value publisher not yet wired.
-
 **Phase 3 — RPC pattern** — in progress. The `query()`/`query_with()` helper
 functions (see `NODE_GUIDE.md`) factor out the get/receive/decode boilerplate
 that's currently hand-rolled inline. **Open discussion, revisit once Params
@@ -224,8 +223,10 @@ that's currently hand-rolled inline. **Open discussion, revisit once Params
 key-expr-binding trait is worth building once more RPCs exist — currently
 deferred since there's no repeated pattern yet to abstract.
 
-**Phase 4 — Params** — not started. Single node serving both fixed values
-and tunables from one config file, as described in Section 4.
+**Phase 4 — Params** — done. Single node serving both fixed values and
+tunables from one config file (Section 4). Tunable mechanism proven end to
+end on Gamepad; further nodes adopt it by implementing `Tunable` and serving
+their `params/{list,set,get}` endpoints.
 
 **Phase 5 — Introspection + Achilles** — not started. Manifest/liveliness-
 based graph discovery, wildcard `get`-based live parameter view (no
@@ -273,6 +274,14 @@ Auto→Halt question gets settled, once the full system exists to test against.
 - Params and Constants are one node, not two, and there is no separate
   registry/mirror node — Achilles queries live values via wildcard `get`
   directly against each node's own parameter queryable.
+- Tunable endpoints are `robot/<name>/params/{list,set,get}` plus a
+  `robot/<name>/params/changed` publish; the Params node serves `[constants]`
+  and per-node slices at `robot/params/get`. Params wire shape is
+  `Vec<(String, ParamValue)>` — postcard cannot round-trip raw
+  `toml::Table`/`toml::Value`, so raw TOML never crosses the wire.
+- Boot loading is pull-based: each node waits on the Params liveliness token
+  and applies its fetched `[params.<name>]` slice through its own
+  `Tunable::set`, the same code path a live `set` RPC uses.
 - SWStop is a human-intervention flag, not a lesser technical failure mode —
   functionally close to EStop, differing mainly in that it's meant to be
   recoverable by a human, and Lifeguard itself can never clear it.

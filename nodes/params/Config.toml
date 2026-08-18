@@ -1,0 +1,9 @@
+[constants]
+wheelbase = 1.5
+max_steer = 22.5  # in degrees for simplicity
+map_path = "../../data/map"
+
+[params.gamepad]
+deadzone = 0.1
+v_min = -1.0
+v_max = 1.0

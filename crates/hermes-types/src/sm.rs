@@ -1,6 +1,6 @@
 use std::fmt;
 use serde::{Deserialize, Serialize};
-use crate::Node;
+use crate::NodeName;
 
 #[repr(u8)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
@@ -36,5 +36,5 @@ pub fn transition(curstate: Mode, newstate: Mode) -> bool {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ModeRequest{
     pub mode: Mode,
-    pub source: Node
+    pub source: NodeName
 }

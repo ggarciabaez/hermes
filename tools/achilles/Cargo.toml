@@ -1,0 +1,15 @@
+[package]
+name = "achilles"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+zenoh = { workspace = true }
+postcard = { workspace = true }
+eframe = "0.35.0"
+egui_graphs = { git = "https://github.com/blitzarx1/egui_graphs"}
+hermes-types = { path = "../../crates/hermes-types" }
+petgraph = "0.8.3"
+rand = { workspace = true }
