@@ -1,11 +1,21 @@
+use clap::Parser;
 use hermes_types::{SendMessage, rpc::Request, NodeName, Node};
 use hermes_types::sm::*;
 use hermes_macros::setup_endpoints;
 
 const NAME: NodeName = NodeName::SM;
 
+#[derive(clap::Parser, Debug)]
+#[command(rename_all = "snake_case")]
+struct Args {
+    #[command(flatten)]
+    #[allow(dead_code)]
+    global: hermes_types::GlobalArgs,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
     let mut mode = Mode::Standby;
     let session = zenoh::open(zenoh::Config::default()).await.unwrap();
     let mut node = Node::new(&session, &NAME).await.unwrap();
@@ -45,6 +55,7 @@ async fn main() {
                 mode_query.reply(mode_query.key_expr(), SendMessage::new(&mode)).await.unwrap();
             }
         }
+        tokio::time::sleep(std::time::Duration::from_millis(args.global.dt as u64)).await;
     }
     session.close().await.unwrap();
 }

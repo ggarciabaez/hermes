@@ -5,7 +5,8 @@ mod utils;
 
 use std::time::Duration;
 use botpad::{AsyncInputController, Axis};
-use tokio::{time, sync::mpsc};
+use clap::Parser;
+use tokio::sync::mpsc;
 use hermes_types::params::Tunable;
 use hermes_types::{
     RecvMessage, SendMessage, NodeName, Node, wait_for_liveliness, sm::{Mode, ModeRequest},
@@ -15,6 +16,17 @@ use hermes_macros::setup_endpoints;
 use utils::*;
 const NAME: NodeName = NodeName::Gamepad;
 
+// gamepad-adapter
+#[derive(clap::Parser, Debug)]
+#[command(rename_all = "snake_case")]
+struct Args {
+    #[command(flatten)]
+    global: hermes_types::GlobalArgs,
+    #[arg(long)]
+    wait_for_params: bool,
+    #[arg(long)]
+    so_on: String,
+}
 
 async fn request_mode_change(command: Command, session: zenoh::Session) -> Result<(), String> {
     let mode = match command{
@@ -50,6 +62,7 @@ async fn handle_command_response(command: Option<Command>, session: zenoh::Sessi
 
 #[tokio::main]
 async fn main() {
+    let args: Args = Args::parse();
     let session = zenoh::open(zenoh::Config::default()).await.unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
 
@@ -61,7 +74,8 @@ async fn main() {
     // apply it through the same Tunable::set a live tweak uses. Defaults on
     // any failure so the node still boots without Params around.
     // Any node that needs to wait for another's liveliness is a secondary node.
-    if wait_for_liveliness(&session, &NodeName::Params, Duration::from_secs(5)).await {
+
+    if args.wait_for_params && wait_for_liveliness(&session, &NodeName::Params, Duration::from_secs(5)).await {
         match node.fetch_params().await {
             Ok(params_list) => {
                 for (key, value) in params_list {
@@ -87,7 +101,6 @@ async fn main() {
     let mode_node = node.sub_mode().await.unwrap();
 
     let controller = setup_controller(tx, *params.deadzone.get()).unwrap();
-    let mut ticker = time::interval(Duration::from_millis(20));
     let mut mode = node.get_mode().await.unwrap_or(Mode::Standby);
     node.activate_liveliness().await.unwrap();
     println!("Async Controller loop started in {}. Waiting for inputs...", mode);
@@ -110,24 +123,24 @@ async fn main() {
                 .await
                 .map_err(|e| eprintln!("{:?}", e)).expect("");
             },
-            _ = ticker.tick() => {
-                state_node.put(&controller.get_state())
-                    .await
-                    .map_err(|e| eprintln!("{:?}", e))
-                    .ok();
-                if mode == Mode::Manual {
-                    let deadzone = *params.deadzone.get();
-                    let v_min = *params.v_min.get();
-                    let v_max = *params.v_max.get();
-                    let v = clamp_drive(apply_deadzone(controller.axis(Axis::RightZ), deadzone), v_min, v_max);
-                    let y = clamp_drive(apply_deadzone(controller.axis(Axis::LeftStickX), deadzone), v_min, v_max);
-                    drive_node.put(&GPadDrive{v, y})
-                        .await
-                        .map_err(|e| eprintln!("{:?}", e))
-                        .ok();
-                }
-            }
         }
+
+        state_node.put(&controller.get_state())
+            .await
+            .map_err(|e| eprintln!("{:?}", e))
+            .ok();
+        if mode == Mode::Manual {
+            let deadzone = *params.deadzone.get();
+            let v_min = *params.v_min.get();
+            let v_max = *params.v_max.get();
+            let v = clamp_drive(apply_deadzone(controller.axis(Axis::RightZ), deadzone), v_min, v_max);
+            let y = clamp_drive(apply_deadzone(controller.axis(Axis::LeftStickX), deadzone), v_min, v_max);
+            drive_node.put(&GPadDrive{v, y})
+                .await
+                .map_err(|e| eprintln!("{:?}", e))
+                .ok();
+        }
+        tokio::time::sleep(Duration::from_millis(args.global.dt as u64)).await;
     }
     session.close().await.unwrap();
 }

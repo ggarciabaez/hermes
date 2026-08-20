@@ -10,4 +10,4 @@ botpad = { workspace = true }
 tokio = { workspace = true }
 zenoh = { workspace = true }
 serde = { workspace = true}
-
+clap = { workspace = true }

@@ -1,13 +1,24 @@
+use clap::Parser;
 use hermes_types::params::{params_from_toml, ParamsGetRequest, ParamValue};
 use hermes_types::rpc::Request;
-use hermes_types::{Node, NodeName, RecvMessage, SendMessage, sm::Mode};
+use hermes_types::{Node, NodeName, RecvMessage, SendMessage, sm::Mode, GlobalArgs};
 use toml::Table;
 
 const NAME: NodeName = NodeName::Params;
 
+#[derive(clap::Parser, Debug)]
+#[command(rename_all = "snake_case")]
+struct Args {
+    #[command(flatten)]
+    global: GlobalArgs,
+    
+    #[arg(long)]
+    cfg: String,
+}
 #[tokio::main]
 async fn main() {
-    let config_raw = std::fs::read_to_string("./nodes/params/Config.toml").unwrap();
+    let args = Args::parse();
+    let config_raw = std::fs::read_to_string(args.cfg).unwrap();
     let config: Table = toml::from_str(&config_raw).unwrap();
 
     let session = zenoh::open(zenoh::Config::default()).await.unwrap();
@@ -54,6 +65,10 @@ async fn main() {
                     .reply(config_req.key_expr(), SendMessage::new(response))
                     .await
                     .unwrap();
+            },
+            _ctrl_c = tokio::signal::ctrl_c() => {
+                println!("Ctrl-C received, exiting.");
+                break;
             },
         }
     }

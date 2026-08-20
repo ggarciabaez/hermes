@@ -35,6 +35,7 @@ pub enum NodeName {
     Achilles,
     Controller,
     Params,
+    Unknown,
 }
 impl fmt::Display for NodeName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -50,6 +51,7 @@ impl NodeName {
             NodeName::Achilles => "Achilles".to_owned(),
             NodeName::Controller => "Controller".to_owned(),
             NodeName::Params => "Params".to_owned(),
+            NodeName::Unknown => "Unknown".to_owned(),
         }
     }
     pub fn make_endpoint(&self, endpoint: &str) -> String {
@@ -68,6 +70,7 @@ impl NodeName {
             NodeName::Achilles => 9,
             NodeName::Controller => 2,
             NodeName::Params => 0,
+            NodeName::Unknown => 9,
         }
     }
 
@@ -174,6 +177,32 @@ impl Node {
         Ok(())
     }
 
+
+    pub async fn custom_liveliness(&mut self, token: &str) -> Result<(), zenoh::Error> {
+        let manifest = Arc::new(sRwLock::new(Manifest {
+            publishes: vec![], subscribes: vec![], serves: vec![]
+        }));
+        self._manifest_queryable = self.session
+            .declare_queryable(format!("robot/{}/manifest", token))
+            .callback(move |query| {
+                // Zenoh callbacks are synchronous, so we use .wait() instead of .await
+                let m = manifest.read().unwrap();
+                let mc = m.clone();
+                let reply_data = SendMessage::new(&mc);
+
+                query.reply(query.key_expr().clone(), reply_data)
+                    .wait()
+                    .unwrap_or_else(|e| eprintln!("Failed to reply to manifest query: {}", e));
+            })
+            .await?;
+        let liveliness = self.session
+            .liveliness()
+            .declare_token(
+                format!("robot/{}/liveliness", token)
+            ).await?;
+        self.liveliness = Some(liveliness);
+        Ok(())
+    }
 
     fn update_manifest(&mut self, name: &str, endpoint_type: u8) {
         let mut m = self.manifest.write().unwrap();
@@ -320,4 +349,11 @@ pub async fn wait_for_liveliness(
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+#[derive(clap::Args, Debug)]
+#[command(rename_all = "snake_case")]
+pub struct GlobalArgs {
+    #[arg(long)]
+    pub dt: u16
 }

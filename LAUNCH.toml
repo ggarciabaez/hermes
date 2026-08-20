@@ -1,0 +1,23 @@
+[settings]
+delay = 0.5
+log_dir = "./docs/log/"
+pass_args = true
+[settings.global]
+dt = 16  # msecs
+
+# Use the node package name, not the actual node name itself, to define the launch.
+[params]
+cfg = "./nodes/params/Config.toml"
+priority = 0
+
+[state-machine]
+priority = 0
+
+[gamepad-adapter]
+priority = 1
+wait_for_params = false
+so_on = "so_forth"
+
+[load-test]
+priority = 9
+n = 10

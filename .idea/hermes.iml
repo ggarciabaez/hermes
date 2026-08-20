@@ -12,6 +12,7 @@
       <sourceFolder url="file://$MODULE_DIR$/nodes/params/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/hermes-macros/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tools/achilles/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/load-test/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

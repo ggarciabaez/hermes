@@ -1,0 +1,11 @@
+[package]
+name = "load-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { workspace = true }
+tokio = { workspace = true }
+hermes-types = {path = "../../crates/hermes-types"}
+zenoh = { workspace = true }
+tokio-util = "0.7.19"
