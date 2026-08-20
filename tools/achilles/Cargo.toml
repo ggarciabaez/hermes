@@ -13,3 +13,5 @@ egui_graphs = { git = "https://github.com/blitzarx1/egui_graphs"}
 hermes-types = { path = "../../crates/hermes-types" }
 petgraph = "0.8.3"
 rand = { workspace = true }
+botpad = { workspace = true }
+clap = { version = "4.6.6", features = ["derive"] }

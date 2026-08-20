@@ -1,7 +1,7 @@
 use clap::Parser;
-use hermes_types::{SendMessage, rpc::Request, NodeName, Node};
-use hermes_types::sm::*;
 use hermes_macros::setup_endpoints;
+use hermes_types::sm::*;
+use hermes_types::{Node, NodeName, SendMessage, rpc::Request};
 
 const NAME: NodeName = NodeName::SM;
 
@@ -17,7 +17,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
     let mut mode = Mode::Standby;
-    let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+    let session = zenoh::open(hermes_types::config::default_config()).await.unwrap();
     let mut node = Node::new(&session, &NAME).await.unwrap();
     setup_endpoints!(node,
         pubs: [curmode = "current"],
@@ -31,7 +31,7 @@ async fn main() {
         tokio::select! {
             Ok(mode_query) = chmode.get() => {
                 let request: Request<ModeRequest> = (&mode_query).try_into().unwrap();
-                
+
                 if !matches!(request.source, NodeName::Gamepad | NodeName::Achilles | NodeName::Lifeguard) {
                     mode_query.reply_err("Access Denied").await.unwrap();
                     continue;
@@ -45,6 +45,7 @@ async fn main() {
                     continue;
                 }
                 mode = request.mode;
+                println!("New mode: {:?}", request.mode);
                 curmode.put(&mode).await.unwrap();
                 mode_query.reply(mode_query.key_expr(), SendMessage::new(true)).await.unwrap();
                 if mode == Mode::Halt {

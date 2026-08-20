@@ -1,5 +1,6 @@
 // TODO: we need a way to
 mod messages;
+pub mod config;
 pub mod rpc;
 pub mod sm;
 pub mod gpad;
@@ -272,6 +273,18 @@ impl Node {
         self.declare_sub(&NodeName::SM.make_endpoint("current")).await
     }
 
+    /// Convenience for param-owning nodes: start the params server AND activate
+    /// liveliness in one call. This exists so a node author doesn't remember to
+    /// do one and forget the other — liveliness stays last, after the params
+    /// endpoints are declared and served.
+    pub async fn setup_with_params<T>(&mut self, params: Arc<tRwLock<T>>) -> Result<(), zenoh::Error>
+    where
+        T: Tunable + Send + Sync + 'static,
+    {
+        self.spawn_params_server(params).await?;
+        self.activate_liveliness().await
+    }
+
     pub async fn spawn_params_server<T>(&mut self, params: Arc<tRwLock<T>>) -> Result<(), zenoh::Error>
     where
         T: Tunable + Send + Sync + 'static,
@@ -355,5 +368,6 @@ pub async fn wait_for_liveliness(
 #[command(rename_all = "snake_case")]
 pub struct GlobalArgs {
     #[arg(long)]
+    #[clap(default_value_t = 16)]
     pub dt: u16
 }

@@ -66,3 +66,23 @@ pub async fn query_with<P: Serialize, T: DeserializeOwned>(
         .map_err(|_| QueryError::Transport)?;
     resolve_reply(replies).await
 }
+
+// fan-out GET (e.g. `robot/*/params/list`): collect every reply until the
+// stream closes or the timeout expires, skipping per-reply errors.
+pub async fn query_all<T: DeserializeOwned>(
+    session: &zenoh::Session,
+    key_expr: &str,
+    timeout: Duration,
+) -> Result<Vec<RecvMessage<T>>, QueryError> {
+    let replies = session.get(key_expr).timeout(timeout).await
+        .map_err(|_| QueryError::Transport)?;
+    let mut out = Vec::new();
+    while let Ok(reply) = replies.recv_async().await {
+        if let Ok(sample) = reply.result()
+            && let Ok(recv) = sample.clone().try_into()
+        {
+            out.push(recv);
+        }
+    }
+    Ok(out)
+}

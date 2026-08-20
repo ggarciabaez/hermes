@@ -6,9 +6,9 @@ that talks to the others exclusively over Zenoh key expressions — there is no
 shared memory, no in-process bus, and no node reaches into another node's state.
 
 This file documents what actually exists in the tree today. Design intent that
-has not been built yet lives in `docs/` (`f1tenth-rust-plan.md`,
+has not been built yet lives in `` (`f1tenth-rust-plan.md`,
 `NODE_GUIDE.md`, `hermes-types.md`, `roadmap.md`); where the two disagree, this
-file and the per-folder `DOCS.md` files describe the code, and `docs/` describes
+file and the per-folder `DOCS.md` files describe the code, and `` describes
 the target.
 
 ## Documentation map
@@ -16,14 +16,14 @@ the target.
 | File | Covers |
 |---|---|
 | `DOCS.md` (this file) | System architecture, key-expression map, wire format, boot order, build/run |
-| `nodes/DOCS.md` | **The node authoring guide** — what every node must do, in order |
+| `../nodes/DOCS.md` | **The node authoring guide** — what every node must do, in order |
 | `nodes/*/DOCS.md` | One per node: features, endpoints, gaps |
-| `crates/DOCS.md` | What belongs in a shared crate vs. in a node |
+| `../crates/DOCS.md` | What belongs in a shared crate vs. in a node |
 | `crates/*/DOCS.md` | One per library crate: API surface, gaps |
-| `docs/f1tenth-rust-plan.md` | Full target architecture (mostly unbuilt) |
-| `docs/roadmap.md`, `ROADMAP.md` | Phase checklists (two variants, see *Gaps*) |
+| `f1tenth-rust-plan.md` | Full target architecture (mostly unbuilt) |
+| `roadmap.md`, `../ROADMAP.md` | Phase checklists (two variants, see *Gaps*) |
 
-`tools/` (Achilles, the egui debug tool) is deliberately out of scope here.
+`../tools` (Achilles, the egui debug tool) is deliberately out of scope here.
 
 ## Workspace layout
 
@@ -40,9 +40,9 @@ hermes/
 └── docs/                 design docs and roadmaps
 ```
 
-Workspace members are listed in the root `Cargo.toml`; adding a node is
+Workspace members are listed in the root `../Cargo.toml`; adding a node is
 `cargo new nodes/<name>` plus one line in `members` (see
-`docs/new_component.txt`).
+`new_component.txt`).
 
 ## Architecture in one page
 
@@ -92,7 +92,7 @@ Boot loading is a **pull**: a node waits for the Params liveliness token, calls
 `fetch_params()`, and applies each `(key, ParamValue)` through its own
 `Tunable::set` — the identical code path a live `set` RPC would take, so there
 is exactly one way a tunable ever changes. See
-`crates/hermes-types/DOCS.md` for the type-level detail.
+`../crates/hermes-types/DOCS.md` for the type-level detail.
 
 ## Wire format
 
@@ -101,7 +101,7 @@ is no JSON, no schema file, no IDL — the shared Rust type *is* the schema, whi
 is why every cross-node type must live in `hermes-types` and nowhere else.
 
 Three wrappers do all the encoding/decoding
-(`crates/hermes-types/src/messages.rs`, `crates/hermes-types/src/rpc.rs`):
+(`../crates/hermes-types/src/messages.rs`, `../crates/hermes-types/src/rpc.rs`):
 
 | Wrapper | Direction | Used for |
 |---|---|---|
@@ -142,7 +142,7 @@ reason nothing hand-rolls its own message shapes.
 
 Note `NodeName::SM.name()` is `"State_Machine"`, so its domain is
 `robot/state_machine/` — not `robot/sm/` and not `robot/mode/` (the latter
-appears in `docs/NODE_GUIDE.md` and in `nodes/gamepad-adapter/examples/`, both
+appears in `NODE_GUIDE.md` and in `../nodes/gamepad-adapter/examples`, both
 of which predate the current naming).
 
 The `params/*` row group is served by `Node::spawn_params_server`
@@ -183,7 +183,7 @@ has no such fallback for State Machine — with no State Machine running,
 `get_mode()` times out and it starts in `Standby`, where it publishes controller
 state but no drive values.
 
-The Params node reads `./nodes/params/Config.toml` as a **hardcoded relative
+The Params node reads `../nodes/params/Config.toml` as a **hardcoded relative
 path** (`nodes/params/src/main.rs:10`), so it only works when launched from the
 workspace root.
 
@@ -209,7 +209,7 @@ expressions and are not maintained as tests.
 Items that are missing everywhere rather than in one node. Per-node gaps live in
 each folder's own `DOCS.md`.
 
-- **No `ctrl_c` handling anywhere.** `docs/NODE_GUIDE.md` requires every node's
+- **No `ctrl_c` handling anywhere.** `NODE_GUIDE.md` requires every node's
   `select!` to have a `tokio::signal::ctrl_c()` branch treated identically to
   `Mode::Halt`. No node has one, so Ctrl-C kills processes without stopping
   actuators or closing the session. This is the single most consistent
@@ -224,7 +224,7 @@ each folder's own `DOCS.md`.
 - **No fault channel.** `Severity`, `FaultReport`, and the Lifeguard node do not
   exist, so "all faults go through one channel" is currently unenforced — nodes
   `eprintln!` locally.
-- **No tests.** Zero `#[test]` functions in `crates/` or `nodes/`. Pure logic
+- **No tests.** Zero `#[test]` functions in `../crates` or `../nodes`. Pure logic
   that is trivially testable today — `sm::transition`, `Param::set` bounds
   rejection, `ParamValue` conversions, `params_from_toml` — has no coverage.
 - **No structured logging.** Everything is `println!`/`eprintln!` with ad-hoc
@@ -238,12 +238,12 @@ each folder's own `DOCS.md`.
   mode authority — a single malformed request payload takes it down and with it
   the whole system's ability to change mode. `Request<T>::try_from` itself
   unwraps a missing payload (`crates/hermes-types/src/rpc.rs:24`).
-- **Two divergent roadmaps.** `ROADMAP.md` (root, time-estimate oriented, phase
-  numbering through 12) and `docs/roadmap.md` (status-oriented, different phase
+- **Two divergent roadmaps.** `../ROADMAP.md` (root, time-estimate oriented, phase
+  numbering through 12) and `roadmap.md` (status-oriented, different phase
   numbering) describe the same project with conflicting phase numbers. One
   should be deleted or made canonical.
-- **`Cargo.lock` is gitignored** (`.gitignore:4`) even though this workspace
+- **`../Cargo.lock` is gitignored** (`.gitignore:4`) even though this workspace
   produces binaries, so builds are not reproducible from a fresh clone.
-- **`docs/` has drifted.** `NODE_GUIDE.md` shows `robot/mode/get`, a
+- **`` has drifted.** `NODE_GUIDE.md` shows `robot/mode/get`, a
   `Node::Gamepad` enum name, and `query()` returning `T` rather than
   `RecvMessage<T>` — all superseded by the current code.

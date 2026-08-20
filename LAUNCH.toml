@@ -20,4 +20,4 @@ so_on = "so_forth"
 
 [load-test]
 priority = 9
-n = 10
+n = 0

@@ -13,6 +13,7 @@ struct Args {
     global: GlobalArgs,
     
     #[arg(long)]
+    #[clap(default_value = "./nodes/params/Config.toml")]
     cfg: String,
 }
 #[tokio::main]
@@ -21,7 +22,7 @@ async fn main() {
     let config_raw = std::fs::read_to_string(args.cfg).unwrap();
     let config: Table = toml::from_str(&config_raw).unwrap();
 
-    let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+    let session = zenoh::open(hermes_types::config::default_config()).await.unwrap();
     let mut node = Node::new(&session, &NAME).await.unwrap();
     let config_q = node.declare_queryable("get").await.unwrap();
     let mode_node = node.sub_mode().await.unwrap();

@@ -137,6 +137,8 @@ dependencies = [
 name = "achilles"
 version = "0.1.0"
 dependencies = [
+ "botpad",
+ "clap",
  "eframe",
  "egui_graphs",
  "hermes-types",

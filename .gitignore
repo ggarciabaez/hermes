@@ -2,3 +2,7 @@
 **/*.rs.bk
 *.pdb
 Cargo.lock
+.idea/
+/docs/log/
+session.txt
+*.pcapng

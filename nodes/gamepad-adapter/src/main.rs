@@ -4,13 +4,14 @@ So the gamepad will expose a drive publisher, a state publisher and stream to an
 mod utils;
 
 use std::time::Duration;
+use std::sync::Arc;
 use botpad::{AsyncInputController, Axis};
 use clap::Parser;
 use tokio::sync::mpsc;
 use hermes_types::params::Tunable;
 use hermes_types::{
     RecvMessage, SendMessage, NodeName, Node, wait_for_liveliness, sm::{Mode, ModeRequest},
-    gpad::GPadDrive,
+    gpad::GPadDrive, config::default_config
 };
 use hermes_macros::setup_endpoints;
 use utils::*;
@@ -25,6 +26,7 @@ struct Args {
     #[arg(long)]
     wait_for_params: bool,
     #[arg(long)]
+    #[clap(default_value = "so_forth")]
     so_on: String,
 }
 
@@ -63,7 +65,7 @@ async fn handle_command_response(command: Option<Command>, session: zenoh::Sessi
 #[tokio::main]
 async fn main() {
     let args: Args = Args::parse();
-    let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+    let session = zenoh::open(default_config()).await.unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
 
     // TODO: these two are quite easy names to confuse
@@ -100,9 +102,16 @@ async fn main() {
     queries: [ ]);
     let mode_node = node.sub_mode().await.unwrap();
 
-    let controller = setup_controller(tx, *params.deadzone.get()).unwrap();
+    let deadzone = *params.deadzone.get();
+    let controller = setup_controller(tx, deadzone).unwrap();
     let mut mode = node.get_mode().await.unwrap_or(Mode::Standby);
-    node.activate_liveliness().await.unwrap();
+
+    // Serve params + declare liveliness together, so the node can't do one
+    // without the other. The params server keeps this node's live-tunable
+    // values queryable/editable (Achilles' param view reads/writes them).
+    let mut ticker = tokio::time::interval(Duration::from_millis(args.global.dt as u64));
+    let params = Arc::new(tokio::sync::RwLock::new(params));
+    node.setup_with_params(params.clone()).await.unwrap();
     println!("Async Controller loop started in {}. Waiting for inputs...", mode);
 
     // Main Control Loop
@@ -112,7 +121,6 @@ async fn main() {
             Ok(mode_q) = mode_node.get() => {
                 let curmode: RecvMessage<Mode> = mode_q.try_into().unwrap();
                 mode = curmode.payload;
-                println!("Received mode: {:?}", mode);
                 if mode == Mode::Halt {
                     println!("Got {:?} mode. Stopping...", mode.to_string());
                     break
@@ -123,24 +131,29 @@ async fn main() {
                 .await
                 .map_err(|e| eprintln!("{:?}", e)).expect("");
             },
+            _ = ticker.tick() => {
+                state_node.put(&controller.get_state())
+                    .await
+                    .map_err(|e| eprintln!("{:?}", e))
+                    .ok();
+                if mode == Mode::Manual {
+                    let p = params.read().await;
+                    let deadzone = *p.deadzone.get();
+                    let v_min = *p.v_min.get();
+                    let v_max = *p.v_max.get();
+                    drop(p);
+                    // TODO: make the proper driving function (remember triggers are [-1, 1]) from
+                    // the bike sim we did. deadzones don't work nicely either like this.
+                    let v = clamp_drive(apply_deadzone(controller.axis(Axis::RightZ), deadzone), v_min, v_max);
+                    let y = clamp_drive(apply_deadzone(controller.axis(Axis::LeftStickX), deadzone), v_min, v_max);
+                    drive_node.put(&GPadDrive{v, y})
+                        .await
+                        .map_err(|e| eprintln!("{:?}", e))
+                        .ok();
+                }
+            }
         }
 
-        state_node.put(&controller.get_state())
-            .await
-            .map_err(|e| eprintln!("{:?}", e))
-            .ok();
-        if mode == Mode::Manual {
-            let deadzone = *params.deadzone.get();
-            let v_min = *params.v_min.get();
-            let v_max = *params.v_max.get();
-            let v = clamp_drive(apply_deadzone(controller.axis(Axis::RightZ), deadzone), v_min, v_max);
-            let y = clamp_drive(apply_deadzone(controller.axis(Axis::LeftStickX), deadzone), v_min, v_max);
-            drive_node.put(&GPadDrive{v, y})
-                .await
-                .map_err(|e| eprintln!("{:?}", e))
-                .ok();
-        }
-        tokio::time::sleep(Duration::from_millis(args.global.dt as u64)).await;
     }
     session.close().await.unwrap();
 }

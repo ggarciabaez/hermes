@@ -5,7 +5,7 @@ How a Hermes node is built, derived from the three `main.rs` files that exist
 framework you inherit from: `hermes_types::Node` gives you the plumbing, but the
 ordering and the loop are yours to write correctly each time.
 
-Read `../DOCS.md` first for the architecture and key-expression map. Design
+Read `../docs/DOCS.md` first for the architecture and key-expression map. Design
 rationale that is not yet implemented lives in `../docs/NODE_GUIDE.md`.
 
 ## What a node is
@@ -296,4 +296,4 @@ async fn main() {
    define a wire type in the node crate.
 5. Write `main.rs` following the sequence above.
 6. Add a `DOCS.md` in the node folder: features, endpoint table, gaps.
-7. Update the key-expression map in `../DOCS.md`.
+7. Update the key-expression map in `../docs/DOCS.md`.

@@ -79,8 +79,10 @@ async def launch_node(node_name: str, config: dict, global_params: dict, logger:
 
             if isinstance(value, bool):
                 value = str(value).lower()
-
-            cmd.extend([f"--{key}", str(value)])
+            param = [f"--{key}"]
+            if value not in ["false", "true"]:
+                param.append(str(value))
+            cmd.extend(param)
 
     logger.log(f"[Orchestrator] Launching {node_name}: {' '.join(cmd)}\n")
 
