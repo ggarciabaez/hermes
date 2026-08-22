@@ -1,6 +1,0 @@
-New mode enum:
-
-pub enum Mode { Standby, Manual, Auto, EStop, SWStop, Halt };
-
-Gamepad does RPC calls mainly. No need for the stuff. We still need the Command enum to send actions, like SendRPC or EStop and such.
-This makes sure that the gamepad doesn't need to directly touch RPC at all.

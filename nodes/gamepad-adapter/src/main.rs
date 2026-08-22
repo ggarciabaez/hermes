@@ -109,7 +109,7 @@ async fn main() {
     // Serve params + declare liveliness together, so the node can't do one
     // without the other. The params server keeps this node's live-tunable
     // values queryable/editable (Achilles' param view reads/writes them).
-    let mut ticker = tokio::time::interval(Duration::from_millis(args.global.dt as u64));
+    let mut ticker = tokio::time::interval(Duration::from_millis(args.global.dt));
     let params = Arc::new(tokio::sync::RwLock::new(params));
     node.setup_with_params(params.clone()).await.unwrap();
     println!("Async Controller loop started in {}. Waiting for inputs...", mode);

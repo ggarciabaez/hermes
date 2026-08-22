@@ -1,5 +1,6 @@
 TODOs:
 
+the params node doesn't need to exist lowk (check out the bike main for details ;)
 the sim
 rerun visualizer node to go w the sim
 controllers

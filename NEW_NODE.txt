@@ -1,0 +1,5 @@
+- Add the name to NodeName enum
+- Start node code
+- If using params, start params struct
+- If using launch config, start args struct + LAUNCH.toml entry w/ priority
+

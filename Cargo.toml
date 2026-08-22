@@ -1,11 +1,19 @@
 [workspace]
 resolver = "3"
-members = ["crates/hermes-macros",
+members = [
+  "crates/hermes-macros",
   "crates/hermes-types",
-  "nodes/gamepad-adapter", "nodes/load-test",
+
+  "nodes/bike", "nodes/controller",
+  "nodes/gamepad-adapter",
+  "nodes/imu",
+  "nodes/lidar",
+  "nodes/load-test",
+  "nodes/motor_driver",
   "nodes/params",
   "nodes/state-machine",
-  "tools/achilles",]
+
+  "tools/achilles", "tools/frontend",]
 
 [workspace.dependencies]
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "time", "process", "macros", "sync", "signal", "fs"] }
@@ -17,3 +25,5 @@ postcard = { version = "1.1.3", features = ["alloc"] }
 botpad = { version = "0.1.4", features = ["tokio"] }
 toml = "1.1.4"
 rand = "0.10.2"
+libm = "0.2.16"
+nalgebra = "0.35.0"

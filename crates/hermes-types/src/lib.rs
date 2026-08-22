@@ -5,6 +5,7 @@ pub mod rpc;
 pub mod sm;
 pub mod gpad;
 pub mod params;
+pub mod bike;
 
 use std::fmt;
 use std::string::ToString;
@@ -37,6 +38,7 @@ pub enum NodeName {
     Controller,
     Params,
     Unknown,
+    Backend,
 }
 impl fmt::Display for NodeName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -52,7 +54,9 @@ impl NodeName {
             NodeName::Achilles => "Achilles".to_owned(),
             NodeName::Controller => "Controller".to_owned(),
             NodeName::Params => "Params".to_owned(),
+            NodeName::Backend => "Backend".to_owned(),
             NodeName::Unknown => "Unknown".to_owned(),
+            
         }
     }
     pub fn make_endpoint(&self, endpoint: &str) -> String {
@@ -71,6 +75,7 @@ impl NodeName {
             NodeName::Achilles => 9,
             NodeName::Controller => 2,
             NodeName::Params => 0,
+            NodeName::Backend => 1,
             NodeName::Unknown => 9,
         }
     }
@@ -369,5 +374,5 @@ pub async fn wait_for_liveliness(
 pub struct GlobalArgs {
     #[arg(long)]
     #[clap(default_value_t = 16)]
-    pub dt: u16
+    pub dt: u64
 }

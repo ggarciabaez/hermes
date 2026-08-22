@@ -28,12 +28,12 @@ async fn main() {
     for i in 0..args.n {
         let mut node = Node::new(&session, &NAME).await.unwrap();
         let name = format!("load{}", i);
-        node.custom_liveliness(&*name).await.unwrap();
+        node.custom_liveliness(&name).await.unwrap();
 
         // Assuming declare_sub returns the handle you need to listen to
         let sub_handle = node.sub_mode().await.unwrap();
         let ctrl_addr = NodeName::Gamepad.domain() + "drive";
-        let ctrl_sub = node.declare_sub(&*ctrl_addr).await.unwrap();
+        let ctrl_sub = node.declare_sub(&ctrl_addr).await.unwrap();
         let tx_clone = tx.clone();
         let token_clone = token.clone();
         node_list.push(node);

@@ -56,7 +56,7 @@ async fn main() {
                 mode_query.reply(mode_query.key_expr(), SendMessage::new(&mode)).await.unwrap();
             }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(args.global.dt as u64)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(args.global.dt)).await;
     }
     session.close().await.unwrap();
 }
