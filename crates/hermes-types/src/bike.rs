@@ -2,11 +2,12 @@ use libm::atanf;
 use std::f32::consts::PI;
 use std::time;
 use serde::{Serialize, Deserialize};
+
 pub fn normalize_rot(v: f32) -> f32 {
     (v + PI) % (PI * 2.0) - PI
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct BikeConfig {
     pub dt: time::Duration,
     pub max_v: f32,
@@ -65,6 +66,9 @@ impl Twist {
     /// - L: Wheelbase in meters
     /// - y: Steering angle in rad (?)
     pub fn to_steering(&self, l: f32) -> f32 {
+        if self.v.abs() < 0.001 {
+            return 0.0;
+        }
         atanf(self.w * l / self.v)
     }
 }

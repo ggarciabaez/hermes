@@ -105,7 +105,6 @@ impl Bicycle {
     pub fn limit_input(&self, u: &Twist) -> Twist {
         let mut t = Twist::new(self.limits_va(u.v), u.w);
         let y_clamped = u.to_steering(self.cfg.l).clamp(-self.max_steer, self.max_steer);
-
         t.w = t.v * y_clamped.tan() / self.cfg.l;
         t
     }

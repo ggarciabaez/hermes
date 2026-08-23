@@ -1,6 +1,6 @@
 [constants]
-wheelbase = 1.5
-max_steer = 22.5  # in degrees for simplicity
+wheelbase = 0.324
+max_steer = 0.3926991
 map_path = "../../data/map"
 
 [params.gamepad]

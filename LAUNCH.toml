@@ -18,6 +18,17 @@ priority = 1
 wait_for_params = false
 so_on = "so_forth"
 
-[load-test]
-priority = 9
-n = 0
+# [load-test]
+# priority = 9
+ #n = 0
+
+[bike]
+twist_pub = "gpad"  # Should match with controller algo if named correctly.
+v = 10.0
+a = 5.0
+steer = 0.3926991
+l = 0.324
+
+[controller]
+algo = "gpad"
+

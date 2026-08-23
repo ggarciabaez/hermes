@@ -68,29 +68,23 @@ async fn main() {
     let session = zenoh::open(default_config()).await.unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
 
-    // TODO: these two are quite easy names to confuse
     let mut node = Node::new(&session, &NAME).await.unwrap();
     let mut params = GamepadParams::defaults();
-
-    // Boot load: wait for Params, pull this node's [params.gamepad] slice and
-    // apply it through the same Tunable::set a live tweak uses. Defaults on
-    // any failure so the node still boots without Params around.
-    // Any node that needs to wait for another's liveliness is a secondary node.
 
     if args.wait_for_params && wait_for_liveliness(&session, &NodeName::Params, Duration::from_secs(5)).await {
         match node.fetch_params().await {
             Ok(params_list) => {
                 for (key, value) in params_list {
                     if let Err(e) = params.set(&key, value) {
-                        eprintln!("[params] ignoring {}: {}", key, e);
+                        eprintln!("[gamepad] ignoring param {}: {}", key, e);
                     }
                 }
-                println!("[params] loaded from Config.toml");
+                println!("[gamepad] loaded from Config.toml");
             }
-            Err(e) => eprintln!("[params] failed to fetch params: {:?}", e),
+            Err(e) => eprintln!("[gamepad] failed to fetch params: {:?}", e),
         }
     } else {
-        eprintln!("[params] Params node not seen within 5s; using defaults");
+        eprintln!("[gamepad] Params node not seen within 5s; using defaults");
     }
 
     setup_endpoints!(
@@ -138,14 +132,14 @@ async fn main() {
                     .ok();
                 if mode == Mode::Manual {
                     let p = params.read().await;
-                    let deadzone = *p.deadzone.get();
-                    let v_min = *p.v_min.get();
-                    let v_max = *p.v_max.get();
+
+
+                    let v = apply_deadzone((
+                        controller.axis(Axis::RightZ)-controller.axis(Axis::LeftZ))/2.0,
+                        *p.deadzone.get()
+                    ).clamp(*p.v_min.get() as f32, *p.v_max.get() as f32);
                     drop(p);
-                    // TODO: make the proper driving function (remember triggers are [-1, 1]) from
-                    // the bike sim we did. deadzones don't work nicely either like this.
-                    let v = clamp_drive(apply_deadzone(controller.axis(Axis::RightZ), deadzone), v_min, v_max);
-                    let y = clamp_drive(apply_deadzone(controller.axis(Axis::LeftStickX), deadzone), v_min, v_max);
+                    let y = apply_deadzone(controller.axis(Axis::LeftStickX), deadzone).clamp(-1.0, 1.0);
                     drive_node.put(&GPadDrive{v, y})
                         .await
                         .map_err(|e| eprintln!("{:?}", e))

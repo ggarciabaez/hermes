@@ -6,3 +6,4 @@ rerun visualizer node to go w the sim
 controllers
 refine achilles
 optimize zenoh settings
+logging please :)

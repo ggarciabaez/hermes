@@ -13,6 +13,12 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/hermes-macros/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tools/achilles/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/nodes/load-test/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/bike/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/controller/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/imu/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/lidar/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/nodes/motor_driver/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tools/frontend/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

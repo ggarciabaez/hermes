@@ -1,10 +1,10 @@
 mod sim;
 
 use clap::Parser; // cause we will def be needing args.
-// Also for that matter, with the orchestrator we def don't need the params node, right?
-// We just pass that stuff in as arguments to the command. Anyways...
+// Also, for that matter, with the orchestrator we def don't need the params node, right?
+// We just pass that stuff in as arguments to the command. Anyway...
 use hermes_types::{
-    RecvMessage, NodeName, Node, sm::Mode,
+    SendMessage, RecvMessage, NodeName, Node, sm::Mode,
     config::default_config,
     bike::{BikeConfig, Twist}
 };
@@ -66,14 +66,18 @@ async fn main() {
             true_pos = "true_pos",
             odom = "odom",
         ],
-        queries: []
+        queries: [
+            get_cfg = "get_cfg",
+        ]
     );
-    let twist_node = node.declare_sub(&args.twist_pub).await.unwrap();
+    let twist_loc = NodeName::Controller.domain() + &args.twist_pub;
+    let twist_node = node.declare_sub(&twist_loc).await.unwrap();
     let mode_node = node.sub_mode().await.unwrap();
     
     let mut ticker: Interval = tokio::time::interval(time::Duration::from_millis(args.global.dt));
     node.activate_liveliness().await.unwrap();
     let mut latest_input = Twist {v: 0.0, w: 0.0};
+    let mut mode = Mode::Standby;
     loop {
         tokio::select! {
             biased;
@@ -83,16 +87,24 @@ async fn main() {
                     println!("Got mode {:?}, exiting...", curmode.payload);
                     break;
                 }
+                mode = curmode.payload;
             },
             _ = ticker.tick() => {
                 let (ddist, dangle) = bike.step(latest_input);
                 odom.put(&Twist::new(ddist, dangle)).await.unwrap();
             },
             Ok(twist_msg) = twist_node.get() => {
-                let curmode: RecvMessage<Twist> = twist_msg.try_into().unwrap();
-                latest_input = curmode.payload;
-            },
+                let drive: RecvMessage<Twist> = twist_msg.try_into().unwrap();
+                if matches!(mode, Mode::Manual | Mode::Auto){
+                    latest_input = drive.payload;
+                } else {
+                    latest_input = Twist::zero();
+                }
 
+            },
+            Ok(cfg_req) = get_cfg.get() => {
+                cfg_req.reply(cfg_req.key_expr(), SendMessage::new(&bike.cfg)).await.unwrap();
+            }
             
             _ctrl_c = tokio::signal::ctrl_c() => {
                 println!("Ctrl-C received, exiting...");

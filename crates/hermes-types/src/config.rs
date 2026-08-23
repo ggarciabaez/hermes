@@ -22,6 +22,16 @@ pub const COMPRESSION_ENABLED: bool = true;
 pub fn default_config() -> Config {
     let cfg = format!(
         r#"{{
+            mode: "peer",
+            scouting: {{
+                multicast: {{
+                  enabled: true,
+                  address: "224.0.0.224:7446",
+                  interface: "auto",
+                  autoconnect: {{ router: [], peer: ["router", "peer"] }},
+                  listen: true,
+                }},
+              }},
             adminspace: {{ enabled: {} }},
             transport: {{
                 unicast: {{ compression: {{ enabled: {} }} }},
