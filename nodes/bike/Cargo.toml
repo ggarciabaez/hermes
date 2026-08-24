@@ -10,8 +10,6 @@ zenoh = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 libm = { workspace = true }
-rand = { workspace = true }
 nalgebra = { workspace = true }
-
-rerun = "0.36.0" # Check for the latest rerun-rs version
+rand = { workspace = true }
 rand_distr = "0.4"

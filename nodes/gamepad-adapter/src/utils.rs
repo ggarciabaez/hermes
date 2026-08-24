@@ -86,9 +86,6 @@ pub fn apply_deadzone(value: f32, deadzone: f64) -> f32 {
     }
 }
 
-pub fn clamp_drive(value: f32, min: f64, max: f64) -> f32 {
-    value.clamp(min as f32, max as f32)
-}
 
 pub fn setup_controller(tx: mpsc::UnboundedSender<Command>, deadzone: f64) -> Result<AsyncInputController<Command>, String> {
     let gilrs = Gilrs::new().expect("Failed to initialize gilrs");

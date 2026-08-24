@@ -18,6 +18,7 @@ impl std::ops::Deref for Bicycle {
     }
 }
 
+#[allow(dead_code)]
 impl Bicycle {
     /// TODO: add covariance-based noise using statrs
     pub fn from_cfg(x0: Vector3<f32>, cfg: BikeConfig) -> Self {

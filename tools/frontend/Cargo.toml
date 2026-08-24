@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+hermes-types = { path = "../../crates/hermes-types" }
+hermes-macros = { path = "../../crates/hermes-macros" }
+zenoh = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+libm = { workspace = true }
+rand = { workspace = true }
+nalgebra = { workspace = true }
+
+rerun = "0.36.0" # Check for the latest rerun-rs version
+rand_distr = "0.6"

@@ -1028,8 +1028,7 @@ dependencies = [
  "libm",
  "nalgebra",
  "rand 0.10.2",
- "rand_distr",
- "rerun",
+ "rand_distr 0.4.3",
  "tokio",
  "zenoh",
 ]
@@ -3799,6 +3798,18 @@ checksum = "795cbfc56d419a7ce47ccbb7504dd9a5b7c484c083c356e797de08bd988d9629"
 [[package]]
 name = "frontend"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "hermes-macros",
+ "hermes-types",
+ "libm",
+ "nalgebra",
+ "rand 0.10.2",
+ "rand_distr 0.6.0",
+ "rerun",
+ "tokio",
+ "zenoh",
+]
 
 [[package]]
 name = "fsevent-sys"
@@ -7629,6 +7640,16 @@ checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
 dependencies = [
  "num-traits",
  "rand 0.8.7",
+]
+
+[[package]]
+name = "rand_distr"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d431c2703ccf129de4d45253c03f49ebb22b97d6ad79ee3ecfc7e3f4862c1d8"
+dependencies = [
+ "num-traits",
+ "rand 0.10.2",
 ]
 
 [[package]]

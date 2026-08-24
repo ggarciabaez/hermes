@@ -40,8 +40,7 @@ async fn main() {
     let args: Args = Args::parse();
     let session = zenoh::open(default_config()).await.unwrap();
     let mut node: Node = Node::new(&session, &NAME).await.unwrap();
-    let mut config: BikeConfig;
-    let mut outgoing = Twist::new(0.0, 0.0);
+    let config: BikeConfig;
     let ctrl_addr = NodeName::Gamepad.domain() + "drive";
 
     if wait_for_liveliness(&session, &NodeName::Backend, Duration::from_secs(5)).await {
